@@ -18,11 +18,15 @@ body {
 }
 
 /* Button hover effects */
-button:hover {
+button:hover:not(:disabled) {
   filter: brightness(0.95);
 }
 
-/* Smooth transitions for toolbar buttons */
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* Smooth transitions for all buttons */
 button {
   transition: all 0.15s ease;
 }
@@ -37,13 +41,24 @@ button {
   transition: stroke-width 0.2s;
 }
 
-/* Pulse animation for connecting indicator */
+/* Pulse animation */
 @keyframes pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.5; transform: scale(1.5); }
 }
 
-/* Smooth scrollbar for properties panel */
+/* Fade in animation */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Context menu item hover */
+button:hover:not(:disabled) {
+  background: #F1F5F9 !important;
+}
+
+/* Smooth scrollbar */
 ::-webkit-scrollbar {
   width: 5px;
 }
@@ -82,4 +97,16 @@ input[type="number"]::-webkit-inner-spin-button {
 /* Selection color */
 ::selection {
   background: rgba(79, 70, 229, 0.2);
+}
+
+/* Connection port dots hover */
+.mind-map-node div[title="Drag to connect"]:hover {
+  transform: scale(1.3) !important;
+  background: #7C3AED !important;
+}
+
+/* Disabled button */
+button:disabled {
+  cursor: default;
+  opacity: 0.4;
 }

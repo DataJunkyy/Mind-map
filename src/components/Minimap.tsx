@@ -1,3 +1,4 @@
+import { useCallback, useRef } from 'react';
 import type { MindMap, ViewState } from '../types';
 
 interface Props {
@@ -5,16 +6,17 @@ interface Props {
   view: ViewState;
   canvasWidth: number;
   canvasHeight: number;
+  onNavigate: (panX: number, panY: number) => void;
 }
 
-export function Minimap({ map, view, canvasWidth, canvasHeight }: Props) {
+export function Minimap({ map, view, canvasWidth, canvasHeight, onNavigate }: Props) {
   if (map.nodes.length === 0) return null;
 
   const MINIMAP_W = 160;
   const MINIMAP_H = 100;
   const PADDING = 40;
+  const dragging = useRef(false);
 
-  // Calculate bounds of all nodes
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const node of map.nodes) {
     minX = Math.min(minX, node.position.x);
@@ -32,16 +34,55 @@ export function Minimap({ map, view, canvasWidth, canvasHeight }: Props) {
   const worldH = maxY - minY || 1;
   const scale = Math.min(MINIMAP_W / worldW, MINIMAP_H / worldH);
 
-  // Viewport rectangle in world coords
   const vpLeft = (-view.panX / view.zoom);
   const vpTop = (-view.panY / view.zoom);
   const vpW = canvasWidth / view.zoom;
   const vpH = (canvasHeight - 52) / view.zoom;
 
+  const handleClick = useCallback(
+    (e: React.MouseEvent<SVGSVGElement>) => {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+
+      // Convert minimap coords to world coords
+      const worldX = mx / scale + minX;
+      const worldY = my / scale + minY;
+
+      // Center viewport on that point
+      const newPanX = -(worldX - vpW / 2) * view.zoom;
+      const newPanY = -(worldY - vpH / 2) * view.zoom;
+      onNavigate(newPanX, newPanY);
+    },
+    [scale, minX, minY, vpW, vpH, view.zoom, onNavigate]
+  );
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragging.current = true;
+    handleClick(e as React.MouseEvent<SVGSVGElement>);
+  }, [handleClick]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
+    if (!dragging.current) return;
+    handleClick(e);
+  }, [handleClick]);
+
+  const handleMouseUp = useCallback(() => {
+    dragging.current = false;
+  }, []);
+
   return (
     <div style={containerStyle}>
-      <svg width={MINIMAP_W} height={MINIMAP_H} style={{ display: 'block' }}>
-        {/* Connections */}
+      <svg
+        width={MINIMAP_W}
+        height={MINIMAP_H}
+        style={{ display: 'block', cursor: 'pointer' }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+      >
         {map.connections.map((conn) => {
           const from = map.nodes.find((n) => n.id === conn.fromId);
           const to = map.nodes.find((n) => n.id === conn.toId);
@@ -56,7 +97,6 @@ export function Minimap({ map, view, canvasWidth, canvasHeight }: Props) {
           );
         })}
 
-        {/* Nodes */}
         {map.nodes.map((node) => (
           <rect
             key={node.id}
@@ -70,17 +110,16 @@ export function Minimap({ map, view, canvasWidth, canvasHeight }: Props) {
           />
         ))}
 
-        {/* Viewport indicator */}
         <rect
           x={(vpLeft - minX) * scale}
           y={(vpTop - minY) * scale}
           width={vpW * scale}
           height={vpH * scale}
-          fill="none"
+          fill="rgba(79,70,229,0.08)"
           stroke="#4F46E5"
           strokeWidth={1.5}
           rx={1}
-          opacity={0.5}
+          opacity={0.6}
         />
       </svg>
     </div>

@@ -1,6 +1,8 @@
 import { useCallback, useRef, useState, useEffect, type MouseEvent } from 'react';
 import type { MindMap, MindMapNode, Position } from '../types';
 import { useViewState } from '../hooks/useViewState';
+import { useHistory } from '../hooks/useHistory';
+import { useToast, ToastContainer } from './Toast';
 import { MindMapNodeComponent } from './MindMapNode';
 import { ConnectionLine } from './ConnectionLine';
 import { Toolbar } from './Toolbar';
@@ -8,12 +10,15 @@ import { MapList } from './MapList';
 import { PropertiesPanel } from './PropertiesPanel';
 import { Minimap } from './Minimap';
 import { KeyboardShortcuts } from './KeyboardShortcuts';
+import { ContextMenu, type ContextMenuState } from './ContextMenu';
 import { autoLayout } from '../store/autoLayout';
 import {
   addNode,
   updateNode,
   deleteNode,
   addConnection,
+  deleteConnection,
+  duplicateNode,
   saveMap,
   loadMap,
   loadMapsIndex,
@@ -28,11 +33,17 @@ interface Props {
 }
 
 export function Canvas({ initialMap }: Props) {
-  const [map, setMap] = useState<MindMap>(initialMap);
+  const { map, setMap, undo, redo, replaceMap, canUndo, canRedo } = useHistory(initialMap);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
   const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
   const [showMapList, setShowMapList] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [clipboard, setClipboard] = useState<MindMapNode | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [editTrigger, setEditTrigger] = useState<string | null>(null);
+  const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [canvasSize, setCanvasSize] = useState({ w: window.innerWidth, h: window.innerHeight });
@@ -40,20 +51,35 @@ export function Canvas({ initialMap }: Props) {
   const { view, setView, handleWheel, startPan, movePan, endPan, screenToWorld, resetView } =
     useViewState();
 
-  // Track canvas size for minimap
+  const { toasts, addToast, removeToast } = useToast();
+
+  // Auto-save
+  useEffect(() => {
+    saveMap(map);
+  }, [map]);
+
   useEffect(() => {
     const onResize = () => setCanvasSize({ w: window.innerWidth, h: window.innerHeight });
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
+  // Track mouse position for connection preview
+  const handleCanvasMouseMove = useCallback(
+    (e: MouseEvent) => {
+      movePan(e);
+      if (connectingFrom && svgRef.current) {
+        const rect = svgRef.current.getBoundingClientRect();
+        const world = screenToWorld(e.clientX, e.clientY, rect);
+        setMousePos(world);
+      }
+    },
+    [movePan, connectingFrom, screenToWorld]
+  );
+
   const updateMap = useCallback((updater: (m: MindMap) => MindMap) => {
-    setMap((prev) => {
-      const next = updater(prev);
-      saveMap(next);
-      return next;
-    });
-  }, []);
+    setMap((prev) => updater(prev));
+  }, [setMap]);
 
   const handleCanvasClick = useCallback(
     (e: MouseEvent) => {
@@ -61,10 +87,12 @@ export function Canvas({ initialMap }: Props) {
 
       if (connectingFrom) {
         setConnectingFrom(null);
+        setMousePos(null);
         return;
       }
 
       setSelectedId(null);
+      setSelectedConnectionId(null);
     },
     [connectingFrom]
   );
@@ -79,8 +107,29 @@ export function Canvas({ initialMap }: Props) {
       const pos = screenToWorld(e.clientX, e.clientY, rect);
       const nodePos: Position = { x: pos.x - 70, y: pos.y - 22 };
       updateMap((m) => addNode(m, null, nodePos));
+      addToast('Node added', 'success');
     },
-    [screenToWorld, updateMap]
+    [screenToWorld, updateMap, addToast]
+  );
+
+  const handleCanvasContextMenu = useCallback(
+    (e: MouseEvent) => {
+      e.preventDefault();
+      const svg = svgRef.current;
+      if (!svg) return;
+      if (e.target !== svg && !(e.target as HTMLElement).closest('.canvas-bg')) return;
+
+      const rect = svg.getBoundingClientRect();
+      const world = screenToWorld(e.clientX, e.clientY, rect);
+      setContextMenu({
+        x: e.clientX,
+        y: e.clientY,
+        type: 'canvas',
+        worldX: world.x - 70,
+        worldY: world.y - 22,
+      });
+    },
+    [screenToWorld]
   );
 
   const handleNodeSelect = useCallback(
@@ -88,11 +137,14 @@ export function Canvas({ initialMap }: Props) {
       if (connectingFrom && connectingFrom !== id) {
         updateMap((m) => addConnection(m, connectingFrom, id));
         setConnectingFrom(null);
+        setMousePos(null);
+        addToast('Connection created', 'success');
         return;
       }
       setSelectedId(id);
+      setSelectedConnectionId(null);
     },
-    [connectingFrom, updateMap]
+    [connectingFrom, updateMap, addToast]
   );
 
   const handleNodeMove = useCallback(
@@ -127,17 +179,52 @@ export function Canvas({ initialMap }: Props) {
         y: parent.position.y + parent.height / 2 + Math.sin(angle) * dist - 22,
       };
       updateMap((m) => addNode(m, parentId, pos));
+      addToast('Child node added', 'success');
     },
-    [map.nodes, updateMap]
+    [map.nodes, updateMap, addToast]
   );
 
   const handleDeleteNode = useCallback(
     (id: string) => {
       updateMap((m) => deleteNode(m, id));
       if (selectedId === id) setSelectedId(null);
+      addToast('Node deleted', 'info');
     },
-    [selectedId, updateMap]
+    [selectedId, updateMap, addToast]
   );
+
+  const handleDeleteConnection = useCallback(
+    (id: string) => {
+      updateMap((m) => deleteConnection(m, id));
+      if (selectedConnectionId === id) setSelectedConnectionId(null);
+      addToast('Connection deleted', 'info');
+    },
+    [selectedConnectionId, updateMap, addToast]
+  );
+
+  const handleSelectConnection = useCallback((id: string) => {
+    setSelectedConnectionId(id);
+    setSelectedId(null);
+  }, []);
+
+  const handleConnectionContextMenu = useCallback((e: React.MouseEvent, connectionId: string) => {
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      type: 'connection',
+      connectionId,
+    });
+  }, []);
+
+  const handleNodeContextMenu = useCallback((e: React.MouseEvent, nodeId: string) => {
+    setSelectedId(nodeId);
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      type: 'node',
+      nodeId,
+    });
+  }, []);
 
   const handleStartConnect = useCallback((id: string) => {
     setConnectingFrom(id);
@@ -145,7 +232,34 @@ export function Canvas({ initialMap }: Props) {
 
   const handleAutoLayout = useCallback(() => {
     updateMap((m) => autoLayout(m));
-  }, [updateMap]);
+    addToast('Layout applied', 'success');
+  }, [updateMap, addToast]);
+
+  const handleCopy = useCallback((id: string) => {
+    const node = map.nodes.find((n) => n.id === id);
+    if (node) {
+      setClipboard(node);
+      addToast('Node copied', 'info');
+    }
+  }, [map.nodes, addToast]);
+
+  const handlePaste = useCallback((x: number, y: number) => {
+    if (!clipboard) return;
+    updateMap((m) => addNode(m, clipboard.parentId, { x, y }, clipboard.text));
+    addToast('Node pasted', 'success');
+  }, [clipboard, updateMap, addToast]);
+
+  const handleDuplicate = useCallback((id: string) => {
+    updateMap((m) => duplicateNode(m, id));
+    addToast('Node duplicated', 'success');
+  }, [updateMap, addToast]);
+
+  const handleSelectAll = useCallback(() => {
+    // Select first node as a visual indicator
+    if (map.nodes.length > 0) {
+      setSelectedId(map.nodes[0].id);
+    }
+  }, [map.nodes]);
 
   const handleExport = useCallback(() => {
     const json = exportMapAsJSON(map);
@@ -156,19 +270,23 @@ export function Canvas({ initialMap }: Props) {
     a.download = `${map.name.replace(/\s+/g, '-').toLowerCase()}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [map]);
+    addToast('Map exported', 'success');
+  }, [map, addToast]);
 
   const handleImport = useCallback(
     (json: string) => {
       const imported = importMapFromJSON(json);
       if (imported) {
         saveMap(imported);
-        setMap(imported);
+        replaceMap(imported);
         setSelectedId(null);
         resetView();
+        addToast('Map imported', 'success');
+      } else {
+        addToast('Invalid JSON file', 'error');
       }
     },
-    [resetView]
+    [resetView, replaceMap, addToast]
   );
 
   const handleRename = useCallback(
@@ -180,26 +298,28 @@ export function Canvas({ initialMap }: Props) {
 
   const handleNewMap = useCallback(() => {
     const newMap = createNewMap();
-    setMap(newMap);
+    replaceMap(newMap);
     setSelectedId(null);
     resetView();
-  }, [resetView]);
+    addToast('New map created', 'success');
+  }, [resetView, replaceMap, addToast]);
 
   const handleSelectMap = useCallback(
     (id: string) => {
       const loaded = loadMap(id);
       if (loaded) {
-        setMap(loaded);
+        replaceMap(loaded);
         setSelectedId(null);
         resetView();
       }
     },
-    [resetView]
+    [resetView, replaceMap]
   );
 
   const handleDeleteMap = useCallback((id: string) => {
     deleteMap(id);
-  }, []);
+    addToast('Map deleted', 'info');
+  }, [addToast]);
 
   const handleZoomIn = useCallback(() => {
     setView((prev) => ({ ...prev, zoom: Math.min(3, prev.zoom * 1.2) }));
@@ -209,9 +329,64 @@ export function Canvas({ initialMap }: Props) {
     setView((prev) => ({ ...prev, zoom: Math.max(0.2, prev.zoom / 1.2) }));
   }, [setView]);
 
+  const handleMinimapNavigate = useCallback((panX: number, panY: number) => {
+    setView((prev) => ({ ...prev, panX, panY }));
+  }, [setView]);
+
+  // Keyboard shortcuts
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      const isInput = tag === 'INPUT' || tag === 'TEXTAREA';
+
+      // Ctrl combos work everywhere
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'z' && !e.shiftKey) {
+          e.preventDefault();
+          undo();
+          return;
+        }
+        if ((e.key === 'z' && e.shiftKey) || e.key === 'y') {
+          e.preventDefault();
+          redo();
+          return;
+        }
+        if (e.key === 'c' && selectedId) {
+          e.preventDefault();
+          handleCopy(selectedId);
+          return;
+        }
+        if (e.key === 'v' && clipboard) {
+          e.preventDefault();
+          handlePaste(0, 0);
+          return;
+        }
+        if (e.key === 'd' && selectedId) {
+          e.preventDefault();
+          handleDuplicate(selectedId);
+          return;
+        }
+        if (e.key === 'f') {
+          e.preventDefault();
+          // Focus search is handled by toolbar
+          setSearchQuery('');
+          return;
+        }
+        if (e.key === 'a') {
+          e.preventDefault();
+          handleSelectAll();
+          return;
+        }
+      }
+
+      // Don't intercept when typing in inputs
+      if (isInput) return;
+
       if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedConnectionId) {
+          handleDeleteConnection(selectedConnectionId);
+          return;
+        }
         if (selectedId) {
           const node = map.nodes.find((n) => n.id === selectedId);
           if (node && node.parentId !== null) {
@@ -221,17 +396,56 @@ export function Canvas({ initialMap }: Props) {
       }
       if (e.key === 'Escape') {
         setSelectedId(null);
+        setSelectedConnectionId(null);
         setConnectingFrom(null);
+        setMousePos(null);
+        setSearchQuery('');
       }
       if (e.key === 'Tab' && selectedId) {
         e.preventDefault();
         handleAddChild(selectedId);
       }
+
+      // Arrow keys for panning
+      const PAN_STEP = 50;
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setView((prev) => ({ ...prev, panY: prev.panY + PAN_STEP }));
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setView((prev) => ({ ...prev, panY: prev.panY - PAN_STEP }));
+      }
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setView((prev) => ({ ...prev, panX: prev.panX + PAN_STEP }));
+      }
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        setView((prev) => ({ ...prev, panX: prev.panX - PAN_STEP }));
+      }
+
+      // +/- for zoom
+      if (e.key === '=' || e.key === '+') {
+        handleZoomIn();
+      }
+      if (e.key === '-') {
+        handleZoomOut();
+      }
     },
-    [selectedId, map.nodes, handleDeleteNode, handleAddChild]
+    [selectedId, selectedConnectionId, map.nodes, clipboard, handleDeleteNode, handleDeleteConnection, handleAddChild, handleCopy, handlePaste, handleDuplicate, handleSelectAll, handleZoomIn, handleZoomOut, undo, redo, setView]
   );
 
   const selectedNode = selectedId ? map.nodes.find((n) => n.id === selectedId) ?? null : null;
+
+  // Search highlight
+  const searchLower = searchQuery.toLowerCase();
+  const matchedNodeIds = searchQuery
+    ? new Set(map.nodes.filter((n) => n.text.toLowerCase().includes(searchLower)).map((n) => n.id))
+    : null;
+
+  // Connection preview line
+  const connectFromNode = connectingFrom ? map.nodes.find((n) => n.id === connectingFrom) : null;
 
   return (
     <div
@@ -252,6 +466,10 @@ export function Canvas({ initialMap }: Props) {
         <Toolbar
           mapName={map.name}
           zoom={view.zoom}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
           onZoomIn={handleZoomIn}
           onZoomOut={handleZoomOut}
           onResetView={resetView}
@@ -262,6 +480,8 @@ export function Canvas({ initialMap }: Props) {
           onOpenList={() => setShowMapList(true)}
           onAutoLayout={handleAutoLayout}
           onToggleShortcuts={() => setShowShortcuts(true)}
+          onUndo={undo}
+          onRedo={redo}
           nodeCount={map.nodes.length}
           connectionCount={map.connections.length}
         />
@@ -288,11 +508,11 @@ export function Canvas({ initialMap }: Props) {
           }}
           onWheel={handleWheel}
           onMouseDown={(e) => { startPan(e); handleCanvasClick(e); }}
-          onMouseMove={movePan}
-          onMouseUp={endPan}
+          onMouseMove={handleCanvasMouseMove}
+          onMouseUp={(e) => { endPan(); if (connectingFrom && e.target === svgRef.current) { /* noop */ } }}
           onDoubleClick={handleCanvasDoubleClick}
+          onContextMenu={handleCanvasContextMenu}
         >
-          {/* Background grid */}
           <defs>
             <pattern
               id="grid"
@@ -322,24 +542,58 @@ export function Canvas({ initialMap }: Props) {
               const from = map.nodes.find((n) => n.id === conn.fromId);
               const to = map.nodes.find((n) => n.id === conn.toId);
               if (!from || !to) return null;
-              return <ConnectionLine key={conn.id} from={from} to={to} />;
+              return (
+                <ConnectionLine
+                  key={conn.id}
+                  connection={conn}
+                  from={from}
+                  to={to}
+                  isSelected={selectedConnectionId === conn.id}
+                  onSelect={handleSelectConnection}
+                  onContextMenu={handleConnectionContextMenu}
+                />
+              );
             })}
 
-            {/* Nodes */}
-            {map.nodes.map((node) => (
-              <MindMapNodeComponent
-                key={node.id}
-                node={node}
-                isSelected={selectedId === node.id}
-                onSelect={handleNodeSelect}
-                onMove={handleNodeMove}
-                onEdit={handleNodeEdit}
-                onAddChild={handleAddChild}
-                onDelete={handleDeleteNode}
-                onStartConnect={handleStartConnect}
-                zoom={view.zoom}
+            {/* Connection preview line */}
+            {connectFromNode && mousePos && (
+              <line
+                x1={connectFromNode.position.x + connectFromNode.width / 2}
+                y1={connectFromNode.position.y + connectFromNode.height / 2}
+                x2={mousePos.x}
+                y2={mousePos.y}
+                stroke="#4F46E5"
+                strokeWidth={2}
+                strokeDasharray="6 4"
+                opacity={0.6}
+                pointerEvents="none"
               />
-            ))}
+            )}
+
+            {/* Nodes */}
+            {map.nodes.map((node) => {
+              const dimmed = matchedNodeIds && !matchedNodeIds.has(node.id);
+              return (
+                <g key={node.id} opacity={dimmed ? 0.25 : 1} style={{ transition: 'opacity 0.2s' }}>
+                  <MindMapNodeComponent
+                    node={node}
+                    isSelected={selectedId === node.id}
+                    isConnecting={!!connectingFrom}
+                    connectingFrom={connectingFrom}
+                    onSelect={handleNodeSelect}
+                    onMove={handleNodeMove}
+                    onEdit={handleNodeEdit}
+                    onAddChild={handleAddChild}
+                    onDelete={handleDeleteNode}
+                    onStartConnect={handleStartConnect}
+                    onContextMenu={handleNodeContextMenu}
+                    zoom={view.zoom}
+                    triggerEdit={editTrigger === node.id}
+                    onEditTriggered={() => setEditTrigger(null)}
+                  />
+                </g>
+              );
+            })}
           </g>
         </svg>
 
@@ -349,15 +603,16 @@ export function Canvas({ initialMap }: Props) {
           view={view}
           canvasWidth={canvasSize.w - 280}
           canvasHeight={canvasSize.h}
+          onNavigate={handleMinimapNavigate}
         />
 
         {/* Help hint */}
         <div style={hintStyle}>
-          Double-click canvas to add node &middot; Select + Tab for child &middot; Alt+drag to pan
+          Double-click to add &middot; Tab for child &middot; Ctrl+Z undo &middot; Right-click for menu
         </div>
       </div>
 
-      {/* Right panel — always visible */}
+      {/* Right panel */}
       <PropertiesPanel
         map={map}
         selectedNode={selectedNode}
@@ -368,6 +623,31 @@ export function Canvas({ initialMap }: Props) {
         onDeselect={() => setSelectedId(null)}
         onAutoLayout={handleAutoLayout}
       />
+
+      {/* Context Menu */}
+      {contextMenu && (
+        <ContextMenu
+          menu={contextMenu}
+          node={contextMenu.type === 'node' ? map.nodes.find((n) => n.id === contextMenu.nodeId) : null}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          canPaste={!!clipboard}
+          onClose={() => setContextMenu(null)}
+          onAddNode={(x, y) => { updateMap((m) => addNode(m, null, { x, y })); addToast('Node added', 'success'); }}
+          onPaste={(x, y) => handlePaste(x, y)}
+          onSelectAll={handleSelectAll}
+          onAutoLayout={handleAutoLayout}
+          onUndo={undo}
+          onRedo={redo}
+          onEditNode={(id) => setEditTrigger(id)}
+          onDuplicate={handleDuplicate}
+          onCopy={handleCopy}
+          onAddChild={handleAddChild}
+          onConnect={handleStartConnect}
+          onDeleteNode={handleDeleteNode}
+          onDeleteConnection={handleDeleteConnection}
+        />
+      )}
 
       {/* Modals */}
       {showMapList && (
@@ -383,6 +663,9 @@ export function Canvas({ initialMap }: Props) {
       {showShortcuts && (
         <KeyboardShortcuts onClose={() => setShowShortcuts(false)} />
       )}
+
+      {/* Toasts */}
+      <ToastContainer toasts={toasts} onRemove={removeToast} />
     </div>
   );
 }

@@ -4,25 +4,35 @@ import type { MindMapNode as NodeType } from '../types';
 interface Props {
   node: NodeType;
   isSelected: boolean;
+  isConnecting: boolean;
+  connectingFrom: string | null;
   onSelect: (id: string) => void;
   onMove: (id: string, x: number, y: number) => void;
   onEdit: (id: string, text: string) => void;
   onAddChild: (parentId: string) => void;
   onDelete: (id: string) => void;
   onStartConnect: (id: string) => void;
+  onContextMenu: (e: React.MouseEvent, nodeId: string) => void;
   zoom: number;
+  triggerEdit?: boolean;
+  onEditTriggered?: () => void;
 }
 
 export function MindMapNodeComponent({
   node,
   isSelected,
+  isConnecting,
+  connectingFrom,
   onSelect,
   onMove,
   onEdit,
   onAddChild,
   onDelete,
   onStartConnect,
+  onContextMenu,
   zoom,
+  triggerEdit,
+  onEditTriggered,
 }: Props) {
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(node.text);
@@ -30,6 +40,15 @@ export function MindMapNodeComponent({
   const [isHovered, setIsHovered] = useState(false);
   const dragStart = useRef({ x: 0, y: 0, nodeX: 0, nodeY: 0 });
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // External edit trigger (from context menu)
+  useEffect(() => {
+    if (triggerEdit) {
+      setIsEditing(true);
+      setEditText(node.text);
+      onEditTriggered?.();
+    }
+  }, [triggerEdit, node.text, onEditTriggered]);
 
   useEffect(() => {
     if (isEditing && inputRef.current) {
@@ -76,6 +95,12 @@ export function MindMapNodeComponent({
     setEditText(node.text);
   }, [node.text]);
 
+  const handleContextMenu = useCallback((e: MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onContextMenu(e, node.id);
+  }, [node.id, onContextMenu]);
+
   const commitEdit = useCallback(() => {
     setIsEditing(false);
     if (editText.trim() && editText !== node.text) {
@@ -86,10 +111,13 @@ export function MindMapNodeComponent({
   }, [editText, node.id, node.text, onEdit]);
 
   const isRoot = node.parentId === null;
+  const isConnectTarget = isConnecting && connectingFrom !== node.id;
 
-  // Lighten color for child node background
   const lightBg = node.color + '0A';
-  const borderColor = isSelected ? node.color : isRoot ? node.color + 'CC' : node.color + '30';
+  const borderColor = isSelected ? node.color
+    : isConnectTarget ? '#4F46E5'
+    : isRoot ? node.color + 'CC'
+    : node.color + '30';
 
   return (
     <foreignObject
@@ -102,6 +130,7 @@ export function MindMapNodeComponent({
       <div
         onMouseDown={handleMouseDown}
         onDoubleClick={handleDoubleClick}
+        onContextMenu={handleContextMenu}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         className="mind-map-node"
@@ -117,7 +146,9 @@ export function MindMapNodeComponent({
           padding: '8px 14px',
           fontSize: node.fontSize,
           fontWeight: isRoot ? 700 : 500,
-          cursor: isDragging ? 'grabbing' : 'grab',
+          cursor: isConnecting
+            ? (isConnectTarget ? 'cell' : 'default')
+            : isDragging ? 'grabbing' : 'grab',
           userSelect: 'none',
           display: 'flex',
           alignItems: 'center',
@@ -125,6 +156,8 @@ export function MindMapNodeComponent({
           textAlign: 'center',
           boxShadow: isSelected
             ? `0 0 0 3px ${node.color}30, 0 8px 24px rgba(0,0,0,0.12)`
+            : isConnectTarget && isHovered
+            ? `0 0 0 3px #4F46E540, 0 4px 16px rgba(0,0,0,0.1)`
             : isHovered
             ? `0 4px 16px rgba(0,0,0,0.1)`
             : '0 2px 8px rgba(0,0,0,0.06)',
@@ -132,7 +165,7 @@ export function MindMapNodeComponent({
           position: 'relative',
           boxSizing: 'border-box',
           wordBreak: 'break-word',
-          transform: isSelected && !isDragging ? 'scale(1.02)' : 'scale(1)',
+          transform: isSelected && !isDragging ? 'scale(1.02)' : isConnectTarget && isHovered ? 'scale(1.04)' : 'scale(1)',
         }}
       >
         {isEditing ? (
@@ -170,7 +203,7 @@ export function MindMapNodeComponent({
         )}
 
         {/* Floating action bar */}
-        {(isSelected || isHovered) && !isEditing && (
+        {(isSelected || isHovered) && !isEditing && !isConnecting && (
           <div
             style={{
               position: 'absolute',
@@ -220,26 +253,78 @@ export function MindMapNodeComponent({
           </div>
         )}
 
-        {/* Connection dot indicator */}
-        {isRoot && (
-          <div
-            style={{
-              position: 'absolute',
-              bottom: -4,
-              left: '50%',
-              transform: 'translateX(-50%)',
-              width: 8,
-              height: 8,
-              borderRadius: '50%',
-              background: node.color,
-              border: '2px solid #fff',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-            }}
-          />
+        {/* Connection port dots */}
+        {(isSelected || isHovered) && !isEditing && !isConnecting && (
+          <>
+            {/* Right port */}
+            <div
+              onMouseDown={(e) => { e.stopPropagation(); onStartConnect(node.id); }}
+              style={portStyle('right')}
+              title="Drag to connect"
+            />
+            {/* Bottom port */}
+            <div
+              onMouseDown={(e) => { e.stopPropagation(); onStartConnect(node.id); }}
+              style={portStyle('bottom')}
+              title="Drag to connect"
+            />
+            {/* Left port */}
+            <div
+              onMouseDown={(e) => { e.stopPropagation(); onStartConnect(node.id); }}
+              style={portStyle('left')}
+              title="Drag to connect"
+            />
+            {/* Top port (if not root — root has action bar there) */}
+            {!isSelected && (
+              <div
+                onMouseDown={(e) => { e.stopPropagation(); onStartConnect(node.id); }}
+                style={portStyle('top')}
+                title="Drag to connect"
+              />
+            )}
+          </>
+        )}
+
+        {/* Connect target glow */}
+        {isConnectTarget && isHovered && (
+          <div style={{
+            position: 'absolute',
+            inset: -6,
+            borderRadius: isRoot ? 20 : 16,
+            border: '2px dashed #4F46E5',
+            pointerEvents: 'none',
+            animation: 'pulse 1.5s infinite',
+          }} />
         )}
       </div>
     </foreignObject>
   );
+}
+
+function portStyle(position: 'top' | 'bottom' | 'left' | 'right'): React.CSSProperties {
+  const base: React.CSSProperties = {
+    position: 'absolute',
+    width: 10,
+    height: 10,
+    borderRadius: '50%',
+    background: '#4F46E5',
+    border: '2px solid #fff',
+    boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
+    cursor: 'crosshair',
+    zIndex: 5,
+    transition: 'transform 0.15s',
+  };
+
+  switch (position) {
+    case 'top':
+      return { ...base, top: -5, left: '50%', transform: 'translateX(-50%)' };
+    case 'bottom':
+      return { ...base, bottom: -5, left: '50%', transform: 'translateX(-50%)' };
+    case 'left':
+      return { ...base, left: -5, top: '50%', transform: 'translateY(-50%)' };
+    case 'right':
+      return { ...base, right: -5, top: '50%', transform: 'translateY(-50%)' };
+  }
 }
 
 const actionBtnStyle: React.CSSProperties = {

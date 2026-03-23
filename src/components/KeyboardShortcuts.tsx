@@ -5,10 +5,20 @@ interface Props {
 const shortcuts = [
   { keys: ['Double-click'], desc: 'Add a new root node' },
   { keys: ['Tab'], desc: 'Add child to selected node' },
-  { keys: ['Delete', 'Backspace'], desc: 'Delete selected node' },
-  { keys: ['Escape'], desc: 'Deselect / cancel' },
+  { keys: ['Delete', 'Backspace'], desc: 'Delete selected node or connection' },
+  { keys: ['Escape'], desc: 'Deselect / cancel / close search' },
+  { keys: ['Ctrl', 'Z'], desc: 'Undo' },
+  { keys: ['Ctrl', 'Shift', 'Z'], desc: 'Redo' },
+  { keys: ['Ctrl', 'C'], desc: 'Copy selected node' },
+  { keys: ['Ctrl', 'V'], desc: 'Paste node' },
+  { keys: ['Ctrl', 'D'], desc: 'Duplicate selected node' },
+  { keys: ['Ctrl', 'F'], desc: 'Search nodes' },
+  { keys: ['Ctrl', 'A'], desc: 'Select all' },
   { keys: ['Alt', 'Drag'], desc: 'Pan the canvas' },
+  { keys: ['Arrow keys'], desc: 'Pan the canvas' },
   { keys: ['Scroll'], desc: 'Zoom in/out' },
+  { keys: ['+', '-'], desc: 'Zoom in/out' },
+  { keys: ['Right-click'], desc: 'Context menu' },
   { keys: ['Double-click node'], desc: 'Edit node text' },
   { keys: ['Enter'], desc: 'Confirm edit' },
   { keys: ['Shift', 'Enter'], desc: 'New line in edit' },
@@ -53,10 +63,13 @@ const overlayStyle: React.CSSProperties = {
 const modalStyle: React.CSSProperties = {
   background: '#fff',
   borderRadius: 16,
-  width: 400,
+  width: 440,
   maxWidth: '90vw',
+  maxHeight: '80vh',
   boxShadow: '0 24px 48px rgba(0,0,0,0.15)',
   overflow: 'hidden',
+  display: 'flex',
+  flexDirection: 'column',
 };
 
 const headerStyle: React.CSSProperties = {
@@ -65,6 +78,7 @@ const headerStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
+  flexShrink: 0,
 };
 
 const closeBtnStyle: React.CSSProperties = {
@@ -82,6 +96,7 @@ const bodyStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   gap: 2,
+  overflowY: 'auto',
 };
 
 const rowStyle: React.CSSProperties = {

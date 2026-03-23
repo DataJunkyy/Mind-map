@@ -3,6 +3,10 @@ import { useRef, useState } from 'react';
 interface Props {
   mapName: string;
   zoom: number;
+  canUndo: boolean;
+  canRedo: boolean;
+  searchQuery: string;
+  onSearchChange: (q: string) => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onResetView: () => void;
@@ -13,6 +17,8 @@ interface Props {
   onOpenList: () => void;
   onAutoLayout: () => void;
   onToggleShortcuts: () => void;
+  onUndo: () => void;
+  onRedo: () => void;
   nodeCount: number;
   connectionCount: number;
 }
@@ -20,6 +26,10 @@ interface Props {
 export function Toolbar({
   mapName,
   zoom,
+  canUndo,
+  canRedo,
+  searchQuery,
+  onSearchChange,
   onZoomIn,
   onZoomOut,
   onResetView,
@@ -30,11 +40,14 @@ export function Toolbar({
   onOpenList,
   onAutoLayout,
   onToggleShortcuts,
+  onUndo,
+  onRedo,
   nodeCount,
   connectionCount,
 }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [nameHover, setNameHover] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
 
   const handleImportClick = () => fileRef.current?.click();
 
@@ -66,6 +79,20 @@ export function Toolbar({
           </svg>
         </button>
         <div style={dividerStyle} />
+
+        {/* Undo / Redo */}
+        <button onClick={onUndo} style={{ ...iconBtnStyle, opacity: canUndo ? 1 : 0.35 }} title="Undo (Ctrl+Z)" disabled={!canUndo}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 105.64-12.64L1 10"/>
+          </svg>
+        </button>
+        <button onClick={onRedo} style={{ ...iconBtnStyle, opacity: canRedo ? 1 : 0.35 }} title="Redo (Ctrl+Shift+Z)" disabled={!canRedo}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-5.64-12.64L23 10"/>
+          </svg>
+        </button>
+        <div style={dividerStyle} />
+
         <div
           style={{ position: 'relative' }}
           onMouseEnter={() => setNameHover(true)}
@@ -89,6 +116,32 @@ export function Toolbar({
 
       {/* Right section */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        {/* Search */}
+        {showSearch && (
+          <input
+            autoFocus
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') { onSearchChange(''); setShowSearch(false); } }}
+            onBlur={() => { if (!searchQuery) setShowSearch(false); }}
+            placeholder="Search nodes..."
+            style={searchInputStyle}
+          />
+        )}
+        <button
+          onClick={() => {
+            if (showSearch && searchQuery) { onSearchChange(''); }
+            setShowSearch(!showSearch);
+          }}
+          style={{ ...iconBtnStyle, color: searchQuery ? '#4F46E5' : '#475569' }}
+          title="Search nodes (Ctrl+F)"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+        </button>
+        <div style={dividerStyle} />
+
         <button onClick={onAutoLayout} style={toolBtnStyle} title="Auto-arrange nodes">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
@@ -212,6 +265,18 @@ const zoomLabelStyle: React.CSSProperties = {
   border: '1px solid #E2E8F0',
   borderRadius: 6,
   padding: '4px 8px',
+  fontFamily: 'inherit',
+};
+
+const searchInputStyle: React.CSSProperties = {
+  border: '1.5px solid #4F46E5',
+  outline: 'none',
+  fontSize: 13,
+  color: '#1E293B',
+  background: '#fff',
+  width: 160,
+  padding: '5px 10px',
+  borderRadius: 8,
   fontFamily: 'inherit',
 };
 

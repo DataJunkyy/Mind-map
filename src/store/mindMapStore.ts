@@ -162,6 +162,39 @@ export function addConnection(map: MindMap, fromId: string, toId: string): MindM
   };
 }
 
+export function deleteConnection(map: MindMap, connectionId: string): MindMap {
+  return {
+    ...map,
+    connections: map.connections.filter((c) => c.id !== connectionId),
+  };
+}
+
+export function duplicateNode(map: MindMap, nodeId: string, offset: Position = { x: 30, y: 30 }): MindMap {
+  const source = map.nodes.find((n) => n.id === nodeId);
+  if (!source) return map;
+
+  const newNode: MindMapNode = {
+    ...source,
+    id: uuidv4(),
+    position: { x: source.position.x + offset.x, y: source.position.y + offset.y },
+  };
+
+  const connections = [...map.connections];
+  if (source.parentId) {
+    connections.push({
+      id: uuidv4(),
+      fromId: source.parentId,
+      toId: newNode.id,
+    });
+  }
+
+  return {
+    ...map,
+    nodes: [...map.nodes, newNode],
+    connections,
+  };
+}
+
 export function exportMapAsJSON(map: MindMap): string {
   return JSON.stringify(map, null, 2);
 }
