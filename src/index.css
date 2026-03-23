@@ -16,3 +16,70 @@ body {
   width: 100%;
   height: 100vh;
 }
+
+/* Button hover effects */
+button:hover {
+  filter: brightness(0.95);
+}
+
+/* Smooth transitions for toolbar buttons */
+button {
+  transition: all 0.15s ease;
+}
+
+/* Node hover lift */
+.mind-map-node:hover {
+  filter: brightness(1.01);
+}
+
+/* Connection line animation */
+.connection-line {
+  transition: stroke-width 0.2s;
+}
+
+/* Pulse animation for connecting indicator */
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.5); }
+}
+
+/* Smooth scrollbar for properties panel */
+::-webkit-scrollbar {
+  width: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
+
+/* Focus ring for inputs */
+input:focus, textarea:focus {
+  border-color: #4F46E5 !important;
+  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.15);
+}
+
+/* Range input styling */
+input[type="range"] {
+  height: 4px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+/* Number input arrows */
+input[type="number"]::-webkit-inner-spin-button {
+  opacity: 0.5;
+}
+
+/* Selection color */
+::selection {
+  background: rgba(79, 70, 229, 0.2);
+}

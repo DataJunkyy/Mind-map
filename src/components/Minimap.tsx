@@ -1,0 +1,103 @@
+import type { MindMap, ViewState } from '../types';
+
+interface Props {
+  map: MindMap;
+  view: ViewState;
+  canvasWidth: number;
+  canvasHeight: number;
+}
+
+export function Minimap({ map, view, canvasWidth, canvasHeight }: Props) {
+  if (map.nodes.length === 0) return null;
+
+  const MINIMAP_W = 160;
+  const MINIMAP_H = 100;
+  const PADDING = 40;
+
+  // Calculate bounds of all nodes
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const node of map.nodes) {
+    minX = Math.min(minX, node.position.x);
+    minY = Math.min(minY, node.position.y);
+    maxX = Math.max(maxX, node.position.x + node.width);
+    maxY = Math.max(maxY, node.position.y + node.height);
+  }
+
+  minX -= PADDING;
+  minY -= PADDING;
+  maxX += PADDING;
+  maxY += PADDING;
+
+  const worldW = maxX - minX || 1;
+  const worldH = maxY - minY || 1;
+  const scale = Math.min(MINIMAP_W / worldW, MINIMAP_H / worldH);
+
+  // Viewport rectangle in world coords
+  const vpLeft = (-view.panX / view.zoom);
+  const vpTop = (-view.panY / view.zoom);
+  const vpW = canvasWidth / view.zoom;
+  const vpH = (canvasHeight - 52) / view.zoom;
+
+  return (
+    <div style={containerStyle}>
+      <svg width={MINIMAP_W} height={MINIMAP_H} style={{ display: 'block' }}>
+        {/* Connections */}
+        {map.connections.map((conn) => {
+          const from = map.nodes.find((n) => n.id === conn.fromId);
+          const to = map.nodes.find((n) => n.id === conn.toId);
+          if (!from || !to) return null;
+          const x1 = (from.position.x + from.width / 2 - minX) * scale;
+          const y1 = (from.position.y + from.height / 2 - minY) * scale;
+          const x2 = (to.position.x + to.width / 2 - minX) * scale;
+          const y2 = (to.position.y + to.height / 2 - minY) * scale;
+          return (
+            <line key={conn.id} x1={x1} y1={y1} x2={x2} y2={y2}
+              stroke="#CBD5E1" strokeWidth={0.5} />
+          );
+        })}
+
+        {/* Nodes */}
+        {map.nodes.map((node) => (
+          <rect
+            key={node.id}
+            x={(node.position.x - minX) * scale}
+            y={(node.position.y - minY) * scale}
+            width={Math.max(node.width * scale, 3)}
+            height={Math.max(node.height * scale, 2)}
+            rx={1.5}
+            fill={node.color}
+            opacity={0.8}
+          />
+        ))}
+
+        {/* Viewport indicator */}
+        <rect
+          x={(vpLeft - minX) * scale}
+          y={(vpTop - minY) * scale}
+          width={vpW * scale}
+          height={vpH * scale}
+          fill="none"
+          stroke="#4F46E5"
+          strokeWidth={1.5}
+          rx={1}
+          opacity={0.5}
+        />
+      </svg>
+    </div>
+  );
+}
+
+const containerStyle: React.CSSProperties = {
+  position: 'absolute',
+  bottom: 48,
+  right: 12,
+  background: 'rgba(255,255,255,0.9)',
+  backdropFilter: 'blur(8px)',
+  WebkitBackdropFilter: 'blur(8px)',
+  border: '1px solid #E2E8F0',
+  borderRadius: 10,
+  padding: 6,
+  boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
+  zIndex: 50,
+  transition: 'opacity 0.2s',
+};

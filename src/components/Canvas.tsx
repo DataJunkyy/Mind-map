@@ -1,10 +1,14 @@
-import { useCallback, useRef, useState, type MouseEvent } from 'react';
-import type { MindMap, Position } from '../types';
+import { useCallback, useRef, useState, useEffect, type MouseEvent } from 'react';
+import type { MindMap, MindMapNode, Position } from '../types';
 import { useViewState } from '../hooks/useViewState';
 import { MindMapNodeComponent } from './MindMapNode';
 import { ConnectionLine } from './ConnectionLine';
 import { Toolbar } from './Toolbar';
 import { MapList } from './MapList';
+import { PropertiesPanel } from './PropertiesPanel';
+import { Minimap } from './Minimap';
+import { KeyboardShortcuts } from './KeyboardShortcuts';
+import { autoLayout } from '../store/autoLayout';
 import {
   addNode,
   updateNode,
@@ -28,12 +32,22 @@ export function Canvas({ initialMap }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
   const [showMapList, setShowMapList] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showPanel, setShowPanel] = useState(true);
   const svgRef = useRef<SVGSVGElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [canvasSize, setCanvasSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
   const { view, setView, handleWheel, startPan, movePan, endPan, screenToWorld, resetView } =
     useViewState();
 
-  // Auto-save on every change
+  // Track canvas size for minimap
+  useEffect(() => {
+    const onResize = () => setCanvasSize({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
   const updateMap = useCallback((updater: (m: MindMap) => MindMap) => {
     setMap((prev) => {
       const next = updater(prev);
@@ -64,7 +78,6 @@ export function Canvas({ initialMap }: Props) {
 
       const rect = svg.getBoundingClientRect();
       const pos = screenToWorld(e.clientX, e.clientY, rect);
-      // Center the node at click position
       const nodePos: Position = { x: pos.x - 70, y: pos.y - 22 };
       updateMap((m) => addNode(m, null, nodePos));
     },
@@ -79,6 +92,7 @@ export function Canvas({ initialMap }: Props) {
         return;
       }
       setSelectedId(id);
+      setShowPanel(true);
     },
     [connectingFrom, updateMap]
   );
@@ -93,6 +107,13 @@ export function Canvas({ initialMap }: Props) {
   const handleNodeEdit = useCallback(
     (id: string, text: string) => {
       updateMap((m) => updateNode(m, id, { text }));
+    },
+    [updateMap]
+  );
+
+  const handleNodeUpdate = useCallback(
+    (id: string, updates: Partial<MindMapNode>) => {
+      updateMap((m) => updateNode(m, id, updates));
     },
     [updateMap]
   );
@@ -123,6 +144,10 @@ export function Canvas({ initialMap }: Props) {
   const handleStartConnect = useCallback((id: string) => {
     setConnectingFrom(id);
   }, []);
+
+  const handleAutoLayout = useCallback(() => {
+    updateMap((m) => autoLayout(m));
+  }, [updateMap]);
 
   const handleExport = useCallback(() => {
     const json = exportMapAsJSON(map);
@@ -174,12 +199,9 @@ export function Canvas({ initialMap }: Props) {
     [resetView]
   );
 
-  const handleDeleteMap = useCallback(
-    (id: string) => {
-      deleteMap(id);
-    },
-    []
-  );
+  const handleDeleteMap = useCallback((id: string) => {
+    deleteMap(id);
+  }, []);
 
   const handleZoomIn = useCallback(() => {
     setView((prev) => ({ ...prev, zoom: Math.min(3, prev.zoom * 1.2) }));
@@ -189,7 +211,6 @@ export function Canvas({ initialMap }: Props) {
     setView((prev) => ({ ...prev, zoom: Math.max(0.2, prev.zoom / 1.2) }));
   }, [setView]);
 
-  // Keyboard shortcuts
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -212,101 +233,148 @@ export function Canvas({ initialMap }: Props) {
     [selectedId, map.nodes, handleDeleteNode, handleAddChild]
   );
 
+  const selectedNode = selectedId ? map.nodes.find((n) => n.id === selectedId) : null;
+  const panelWidth = showPanel && selectedNode ? 280 : 0;
+
   return (
     <div
-      style={{ width: '100vw', height: '100vh', overflow: 'hidden', background: '#F8FAFC', position: 'relative' }}
+      ref={containerRef}
+      style={{
+        width: '100vw',
+        height: '100vh',
+        overflow: 'hidden',
+        background: '#F8FAFC',
+        position: 'relative',
+        display: 'flex',
+      }}
       tabIndex={0}
       onKeyDown={handleKeyDown}
     >
-      <Toolbar
-        mapName={map.name}
-        zoom={view.zoom}
-        onZoomIn={handleZoomIn}
-        onZoomOut={handleZoomOut}
-        onResetView={resetView}
-        onExport={handleExport}
-        onImport={handleImport}
-        onRename={handleRename}
-        onNewMap={handleNewMap}
-        onOpenList={() => setShowMapList(true)}
-      />
+      {/* Main canvas area */}
+      <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+        <Toolbar
+          mapName={map.name}
+          zoom={view.zoom}
+          onZoomIn={handleZoomIn}
+          onZoomOut={handleZoomOut}
+          onResetView={resetView}
+          onExport={handleExport}
+          onImport={handleImport}
+          onRename={handleRename}
+          onNewMap={handleNewMap}
+          onOpenList={() => setShowMapList(true)}
+          onAutoLayout={handleAutoLayout}
+          onToggleShortcuts={() => setShowShortcuts(true)}
+          nodeCount={map.nodes.length}
+          connectionCount={map.connections.length}
+        />
 
-      {connectingFrom && (
-        <div
+        {connectingFrom && (
+          <div style={connectingBannerStyle}>
+            <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#60A5FA', animation: 'pulse 1.5s infinite' }} />
+            Click another node to connect, or press Escape to cancel
+          </div>
+        )}
+
+        <svg
+          ref={svgRef}
+          className="canvas-container"
+          width="100%"
+          height="100%"
           style={{
             position: 'absolute',
-            top: 60,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            background: '#1E293B',
-            color: '#fff',
-            padding: '8px 16px',
-            borderRadius: 8,
-            fontSize: 13,
-            zIndex: 50,
+            top: 52,
+            left: 0,
+            bottom: 0,
+            right: 0,
+            cursor: connectingFrom ? 'crosshair' : 'default',
           }}
+          onWheel={handleWheel}
+          onMouseDown={(e) => { startPan(e); handleCanvasClick(e); }}
+          onMouseMove={movePan}
+          onMouseUp={endPan}
+          onDoubleClick={handleCanvasDoubleClick}
         >
-          Click another node to connect, or press Escape to cancel
+          {/* Background grid */}
+          <defs>
+            <pattern
+              id="grid"
+              width={40}
+              height={40}
+              patternUnits="userSpaceOnUse"
+              patternTransform={`translate(${view.panX},${view.panY}) scale(${view.zoom})`}
+            >
+              <circle cx={20} cy={20} r={0.6} fill="#CBD5E1" />
+            </pattern>
+            <pattern
+              id="grid-major"
+              width={200}
+              height={200}
+              patternUnits="userSpaceOnUse"
+              patternTransform={`translate(${view.panX},${view.panY}) scale(${view.zoom})`}
+            >
+              <circle cx={100} cy={100} r={1.2} fill="#94A3B8" opacity={0.3} />
+            </pattern>
+          </defs>
+          <rect className="canvas-bg" width="100%" height="100%" fill="url(#grid)" />
+          <rect className="canvas-bg" width="100%" height="100%" fill="url(#grid-major)" />
+
+          <g transform={`translate(${view.panX},${view.panY}) scale(${view.zoom})`}>
+            {/* Connections */}
+            {map.connections.map((conn) => {
+              const from = map.nodes.find((n) => n.id === conn.fromId);
+              const to = map.nodes.find((n) => n.id === conn.toId);
+              if (!from || !to) return null;
+              return <ConnectionLine key={conn.id} from={from} to={to} />;
+            })}
+
+            {/* Nodes */}
+            {map.nodes.map((node) => (
+              <MindMapNodeComponent
+                key={node.id}
+                node={node}
+                isSelected={selectedId === node.id}
+                onSelect={handleNodeSelect}
+                onMove={handleNodeMove}
+                onEdit={handleNodeEdit}
+                onAddChild={handleAddChild}
+                onDelete={handleDeleteNode}
+                onStartConnect={handleStartConnect}
+                zoom={view.zoom}
+              />
+            ))}
+          </g>
+        </svg>
+
+        {/* Minimap */}
+        {!selectedNode && (
+          <Minimap
+            map={map}
+            view={view}
+            canvasWidth={canvasSize.w - panelWidth}
+            canvasHeight={canvasSize.h}
+          />
+        )}
+
+        {/* Help hint */}
+        <div style={hintStyle}>
+          Double-click canvas to add node &middot; Select + Tab for child &middot; Alt+drag to pan
         </div>
-      )}
-
-      <svg
-        ref={svgRef}
-        className="canvas-container"
-        width="100%"
-        height="100%"
-        style={{ position: 'absolute', top: 52, left: 0, bottom: 0, right: 0, cursor: connectingFrom ? 'crosshair' : 'default' }}
-        onWheel={handleWheel}
-        onMouseDown={(e) => { startPan(e); handleCanvasClick(e); }}
-        onMouseMove={movePan}
-        onMouseUp={endPan}
-        onDoubleClick={handleCanvasDoubleClick}
-      >
-        {/* Background grid */}
-        <defs>
-          <pattern id="grid" width={40} height={40} patternUnits="userSpaceOnUse"
-            patternTransform={`translate(${view.panX},${view.panY}) scale(${view.zoom})`}>
-            <circle cx={20} cy={20} r={0.8} fill="#CBD5E1" />
-          </pattern>
-        </defs>
-        <rect className="canvas-bg" width="100%" height="100%" fill="url(#grid)" />
-
-        <g transform={`translate(${view.panX},${view.panY}) scale(${view.zoom})`}>
-          {/* Connections */}
-          {map.connections.map((conn) => {
-            const from = map.nodes.find((n) => n.id === conn.fromId);
-            const to = map.nodes.find((n) => n.id === conn.toId);
-            if (!from || !to) return null;
-            return <ConnectionLine key={conn.id} from={from} to={to} />;
-          })}
-
-          {/* Nodes */}
-          {map.nodes.map((node) => (
-            <MindMapNodeComponent
-              key={node.id}
-              node={node}
-              isSelected={selectedId === node.id}
-              onSelect={handleNodeSelect}
-              onMove={handleNodeMove}
-              onEdit={handleNodeEdit}
-              onAddChild={handleAddChild}
-              onDelete={handleDeleteNode}
-              onStartConnect={handleStartConnect}
-              zoom={view.zoom}
-            />
-          ))}
-        </g>
-      </svg>
-
-      {/* Help hint */}
-      <div style={{
-        position: 'absolute', bottom: 12, left: '50%', transform: 'translateX(-50%)',
-        fontSize: 12, color: '#94A3B8', background: '#fff', padding: '6px 14px',
-        borderRadius: 8, border: '1px solid #E2E8F0',
-      }}>
-        Double-click to add a node &middot; Select + Tab for child &middot; Alt+drag to pan &middot; Scroll to zoom
       </div>
 
+      {/* Right properties panel */}
+      {showPanel && selectedNode && (
+        <PropertiesPanel
+          node={selectedNode}
+          onUpdate={handleNodeUpdate}
+          onAddChild={handleAddChild}
+          onDelete={handleDeleteNode}
+          onStartConnect={handleStartConnect}
+          onClose={() => { setShowPanel(false); setSelectedId(null); }}
+        />
+      )}
+
+      {/* Modals */}
       {showMapList && (
         <MapList
           maps={loadMapsIndex()}
@@ -316,6 +384,42 @@ export function Canvas({ initialMap }: Props) {
           onClose={() => setShowMapList(false)}
         />
       )}
+
+      {showShortcuts && (
+        <KeyboardShortcuts onClose={() => setShowShortcuts(false)} />
+      )}
     </div>
   );
 }
+
+const connectingBannerStyle: React.CSSProperties = {
+  position: 'absolute',
+  top: 60,
+  left: '50%',
+  transform: 'translateX(-50%)',
+  background: '#1E293B',
+  color: '#fff',
+  padding: '8px 16px',
+  borderRadius: 10,
+  fontSize: 13,
+  zIndex: 50,
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+};
+
+const hintStyle: React.CSSProperties = {
+  position: 'absolute',
+  bottom: 12,
+  left: '50%',
+  transform: 'translateX(-50%)',
+  fontSize: 12,
+  color: '#94A3B8',
+  background: 'rgba(255,255,255,0.9)',
+  backdropFilter: 'blur(8px)',
+  padding: '6px 16px',
+  borderRadius: 10,
+  border: '1px solid #E2E8F0',
+  whiteSpace: 'nowrap',
+};

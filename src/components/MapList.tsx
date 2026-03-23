@@ -69,7 +69,8 @@ export function MapList({ maps, currentId, onSelect, onDelete, onClose }: Props)
 const overlayStyle: React.CSSProperties = {
   position: 'fixed',
   inset: 0,
-  background: 'rgba(0,0,0,0.3)',
+  background: 'rgba(15,23,42,0.4)',
+  backdropFilter: 'blur(4px)',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
