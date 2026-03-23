@@ -33,7 +33,6 @@ export function Canvas({ initialMap }: Props) {
   const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
   const [showMapList, setShowMapList] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
-  const [showPanel, setShowPanel] = useState(true);
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [canvasSize, setCanvasSize] = useState({ w: window.innerWidth, h: window.innerHeight });
@@ -92,7 +91,6 @@ export function Canvas({ initialMap }: Props) {
         return;
       }
       setSelectedId(id);
-      setShowPanel(true);
     },
     [connectingFrom, updateMap]
   );
@@ -233,8 +231,7 @@ export function Canvas({ initialMap }: Props) {
     [selectedId, map.nodes, handleDeleteNode, handleAddChild]
   );
 
-  const selectedNode = selectedId ? map.nodes.find((n) => n.id === selectedId) : null;
-  const panelWidth = showPanel && selectedNode ? 280 : 0;
+  const selectedNode = selectedId ? map.nodes.find((n) => n.id === selectedId) ?? null : null;
 
   return (
     <div
@@ -347,14 +344,12 @@ export function Canvas({ initialMap }: Props) {
         </svg>
 
         {/* Minimap */}
-        {!selectedNode && (
-          <Minimap
-            map={map}
-            view={view}
-            canvasWidth={canvasSize.w - panelWidth}
-            canvasHeight={canvasSize.h}
-          />
-        )}
+        <Minimap
+          map={map}
+          view={view}
+          canvasWidth={canvasSize.w - 280}
+          canvasHeight={canvasSize.h}
+        />
 
         {/* Help hint */}
         <div style={hintStyle}>
@@ -362,17 +357,17 @@ export function Canvas({ initialMap }: Props) {
         </div>
       </div>
 
-      {/* Right properties panel */}
-      {showPanel && selectedNode && (
-        <PropertiesPanel
-          node={selectedNode}
-          onUpdate={handleNodeUpdate}
-          onAddChild={handleAddChild}
-          onDelete={handleDeleteNode}
-          onStartConnect={handleStartConnect}
-          onClose={() => { setShowPanel(false); setSelectedId(null); }}
-        />
-      )}
+      {/* Right panel — always visible */}
+      <PropertiesPanel
+        map={map}
+        selectedNode={selectedNode}
+        onUpdate={handleNodeUpdate}
+        onAddChild={handleAddChild}
+        onDelete={handleDeleteNode}
+        onStartConnect={handleStartConnect}
+        onDeselect={() => setSelectedId(null)}
+        onAutoLayout={handleAutoLayout}
+      />
 
       {/* Modals */}
       {showMapList && (

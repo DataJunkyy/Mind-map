@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import type { MindMapNode } from '../types';
+import type { MindMap, MindMapNode } from '../types';
 
 const NODE_COLORS = [
   '#4F46E5', '#7C3AED', '#DB2777', '#DC2626',
@@ -9,15 +9,139 @@ const NODE_COLORS = [
 ];
 
 interface Props {
+  map: MindMap;
+  selectedNode: MindMapNode | null;
+  onUpdate: (id: string, updates: Partial<MindMapNode>) => void;
+  onAddChild: (parentId: string) => void;
+  onDelete: (id: string) => void;
+  onStartConnect: (id: string) => void;
+  onDeselect: () => void;
+  onAutoLayout: () => void;
+}
+
+export function PropertiesPanel({ map, selectedNode, onUpdate, onAddChild, onDelete, onStartConnect, onDeselect, onAutoLayout }: Props) {
+  return (
+    <div style={panelStyle}>
+      {selectedNode ? (
+        <NodeEditor
+          node={selectedNode}
+          onUpdate={onUpdate}
+          onAddChild={onAddChild}
+          onDelete={onDelete}
+          onStartConnect={onStartConnect}
+          onDeselect={onDeselect}
+        />
+      ) : (
+        <MapOverview map={map} onAutoLayout={onAutoLayout} />
+      )}
+    </div>
+  );
+}
+
+/* ── Map Overview (no node selected) ── */
+
+function MapOverview({ map, onAutoLayout }: { map: MindMap; onAutoLayout: () => void }) {
+  const rootNodes = map.nodes.filter((n) => n.parentId === null);
+  const childNodes = map.nodes.filter((n) => n.parentId !== null);
+  const colors = [...new Set(map.nodes.map((n) => n.color))];
+
+  return (
+    <>
+      <div style={headerStyle}>
+        <span style={headerTitleStyle}>Map Overview</span>
+      </div>
+      <div style={bodyStyle}>
+        {/* Map name */}
+        <div style={sectionStyle}>
+          <label style={labelStyle}>Name</label>
+          <div style={{ fontSize: 15, fontWeight: 600, color: '#1E293B', padding: '4px 0' }}>
+            {map.name}
+          </div>
+        </div>
+
+        {/* Stats */}
+        <div style={sectionStyle}>
+          <label style={labelStyle}>Statistics</label>
+          <div style={statsGridStyle}>
+            <div style={statCardStyle}>
+              <span style={statValueStyle}>{map.nodes.length}</span>
+              <span style={statLabelStyle}>Nodes</span>
+            </div>
+            <div style={statCardStyle}>
+              <span style={statValueStyle}>{map.connections.length}</span>
+              <span style={statLabelStyle}>Links</span>
+            </div>
+            <div style={statCardStyle}>
+              <span style={statValueStyle}>{rootNodes.length}</span>
+              <span style={statLabelStyle}>Roots</span>
+            </div>
+            <div style={statCardStyle}>
+              <span style={statValueStyle}>{childNodes.length}</span>
+              <span style={statLabelStyle}>Children</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Colors used */}
+        {colors.length > 0 && (
+          <div style={sectionStyle}>
+            <label style={labelStyle}>Colors Used</label>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              {colors.map((c) => (
+                <div key={c} style={{ width: 20, height: 20, borderRadius: 6, background: c, border: '1px solid rgba(0,0,0,0.08)' }} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Quick Actions */}
+        <div style={{ height: 1, background: '#E2E8F0', margin: '4px 0' }} />
+        <div style={sectionStyle}>
+          <label style={labelStyle}>Quick Actions</label>
+          <button onClick={onAutoLayout} style={overviewActionStyle}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
+            </svg>
+            Auto-arrange nodes
+          </button>
+        </div>
+
+        {/* Tips */}
+        <div style={{ height: 1, background: '#E2E8F0', margin: '4px 0' }} />
+        <div style={sectionStyle}>
+          <label style={labelStyle}>Tips</label>
+          <div style={tipStyle}>Click a node to edit its properties here</div>
+          <div style={tipStyle}>Double-click the canvas to add a new node</div>
+          <div style={tipStyle}>Press Tab to add a child to the selected node</div>
+          <div style={tipStyle}>Alt + drag to pan around the canvas</div>
+        </div>
+
+        {/* Last edited */}
+        <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 8, textAlign: 'center' }}>
+          Last edited: {new Date(map.updatedAt).toLocaleString()}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ── Node Editor (node selected) ── */
+
+function NodeEditor({
+  node,
+  onUpdate,
+  onAddChild,
+  onDelete,
+  onStartConnect,
+  onDeselect,
+}: {
   node: MindMapNode;
   onUpdate: (id: string, updates: Partial<MindMapNode>) => void;
   onAddChild: (parentId: string) => void;
   onDelete: (id: string) => void;
   onStartConnect: (id: string) => void;
-  onClose: () => void;
-}
-
-export function PropertiesPanel({ node, onUpdate, onAddChild, onDelete, onStartConnect, onClose }: Props) {
+  onDeselect: () => void;
+}) {
   const [text, setText] = useState(node.text);
   const isRoot = node.parentId === null;
 
@@ -34,17 +158,13 @@ export function PropertiesPanel({ node, onUpdate, onAddChild, onDelete, onStartC
   };
 
   return (
-    <div style={panelStyle}>
-      {/* Header */}
+    <>
       <div style={headerStyle}>
-        <span style={{ fontSize: 13, fontWeight: 700, color: '#1E293B', letterSpacing: '0.5px', textTransform: 'uppercase' }}>
-          Properties
-        </span>
-        <button onClick={onClose} style={closeBtnStyle} title="Close panel">&times;</button>
+        <span style={headerTitleStyle}>Properties</span>
+        <button onClick={onDeselect} style={closeBtnStyle} title="Deselect node">&times;</button>
       </div>
-
       <div style={bodyStyle}>
-        {/* Node label */}
+        {/* Node type chip */}
         <div style={chipStyle}>
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: node.color, flexShrink: 0 }} />
           <span style={{ fontSize: 11, color: '#64748B', fontWeight: 600 }}>
@@ -190,9 +310,11 @@ export function PropertiesPanel({ node, onUpdate, onAddChild, onDelete, onStartC
           </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
+
+/* ── Styles ── */
 
 const panelStyle: React.CSSProperties = {
   width: 280,
@@ -212,6 +334,15 @@ const headerStyle: React.CSSProperties = {
   alignItems: 'center',
   justifyContent: 'space-between',
   background: '#F8FAFC',
+  flexShrink: 0,
+};
+
+const headerTitleStyle: React.CSSProperties = {
+  fontSize: 13,
+  fontWeight: 700,
+  color: '#1E293B',
+  letterSpacing: '0.5px',
+  textTransform: 'uppercase',
 };
 
 const closeBtnStyle: React.CSSProperties = {
@@ -291,6 +422,62 @@ const numberInputStyle: React.CSSProperties = {
   color: '#1E293B',
   background: '#F8FAFC',
   boxSizing: 'border-box',
+};
+
+const statsGridStyle: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '1fr 1fr',
+  gap: 8,
+};
+
+const statCardStyle: React.CSSProperties = {
+  background: '#F8FAFC',
+  border: '1px solid #E2E8F0',
+  borderRadius: 10,
+  padding: '10px 12px',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  gap: 2,
+};
+
+const statValueStyle: React.CSSProperties = {
+  fontSize: 20,
+  fontWeight: 700,
+  color: '#1E293B',
+};
+
+const statLabelStyle: React.CSSProperties = {
+  fontSize: 11,
+  color: '#94A3B8',
+  fontWeight: 500,
+};
+
+const overviewActionStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  padding: '9px 12px',
+  border: '1px solid #E2E8F0',
+  borderRadius: 8,
+  background: '#F8FAFC',
+  color: '#475569',
+  fontSize: 13,
+  fontWeight: 500,
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+  transition: 'background 0.15s',
+  width: '100%',
+};
+
+const tipStyle: React.CSSProperties = {
+  fontSize: 12,
+  color: '#64748B',
+  padding: '6px 10px',
+  background: '#F8FAFC',
+  borderRadius: 6,
+  border: '1px solid #F1F5F9',
+  lineHeight: 1.4,
 };
 
 function actionButtonStyle(color: string): React.CSSProperties {
