@@ -11,6 +11,7 @@ import { PropertiesPanel } from './PropertiesPanel';
 import { Minimap } from './Minimap';
 import { KeyboardShortcuts } from './KeyboardShortcuts';
 import { ContextMenu, type ContextMenuState } from './ContextMenu';
+import { TestingPanel, type LogEntry } from './TestingPanel';
 import { autoLayout } from '../store/autoLayout';
 import {
   addNode,
@@ -32,6 +33,8 @@ interface Props {
   initialMap: MindMap;
 }
 
+let logId = 0;
+
 export function Canvas({ initialMap }: Props) {
   const { map, setMap, undo, redo, replaceMap, canUndo, canRedo } = useHistory(initialMap);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -39,11 +42,13 @@ export function Canvas({ initialMap }: Props) {
   const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
   const [showMapList, setShowMapList] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showTesting, setShowTesting] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [clipboard, setClipboard] = useState<MindMapNode | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [editTrigger, setEditTrigger] = useState<string | null>(null);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [canvasSize, setCanvasSize] = useState({ w: window.innerWidth, h: window.innerHeight });
@@ -52,6 +57,11 @@ export function Canvas({ initialMap }: Props) {
     useViewState();
 
   const { toasts, addToast, removeToast } = useToast();
+
+  // Event logger
+  const addLog = useCallback((action: string, detail: string, type: LogEntry['type']) => {
+    setLogs(prev => [...prev.slice(-199), { id: ++logId, time: Date.now(), action, detail, type }]);
+  }, []);
 
   // Auto-save
   useEffect(() => {
@@ -108,8 +118,9 @@ export function Canvas({ initialMap }: Props) {
       const nodePos: Position = { x: pos.x - 70, y: pos.y - 22 };
       updateMap((m) => addNode(m, null, nodePos));
       addToast('Node added', 'success');
+      addLog('add-node', `Root node at (${Math.round(nodePos.x)}, ${Math.round(nodePos.y)})`, 'node');
     },
-    [screenToWorld, updateMap, addToast]
+    [screenToWorld, updateMap, addToast, addLog]
   );
 
   const handleCanvasContextMenu = useCallback(
@@ -128,8 +139,9 @@ export function Canvas({ initialMap }: Props) {
         worldX: world.x - 70,
         worldY: world.y - 22,
       });
+      addLog('context-menu', 'Canvas context menu opened', 'map');
     },
-    [screenToWorld]
+    [screenToWorld, addLog]
   );
 
   const handleNodeSelect = useCallback(
@@ -139,12 +151,14 @@ export function Canvas({ initialMap }: Props) {
         setConnectingFrom(null);
         setMousePos(null);
         addToast('Connection created', 'success');
+        addLog('connect', `${connectingFrom.slice(0, 8)} -> ${id.slice(0, 8)}`, 'connection');
         return;
       }
       setSelectedId(id);
       setSelectedConnectionId(null);
+      addLog('select-node', `Node ${id.slice(0, 8)}...`, 'node');
     },
-    [connectingFrom, updateMap, addToast]
+    [connectingFrom, updateMap, addToast, addLog]
   );
 
   const handleNodeMove = useCallback(
@@ -157,15 +171,18 @@ export function Canvas({ initialMap }: Props) {
   const handleNodeEdit = useCallback(
     (id: string, text: string) => {
       updateMap((m) => updateNode(m, id, { text }));
+      addLog('edit-text', `"${text}"`, 'node');
     },
-    [updateMap]
+    [updateMap, addLog]
   );
 
   const handleNodeUpdate = useCallback(
     (id: string, updates: Partial<MindMapNode>) => {
       updateMap((m) => updateNode(m, id, updates));
+      const keys = Object.keys(updates).join(', ');
+      addLog('update-node', keys, 'node');
     },
-    [updateMap]
+    [updateMap, addLog]
   );
 
   const handleAddChild = useCallback(
@@ -180,8 +197,9 @@ export function Canvas({ initialMap }: Props) {
       };
       updateMap((m) => addNode(m, parentId, pos));
       addToast('Child node added', 'success');
+      addLog('add-child', `Parent: ${parentId.slice(0, 8)}...`, 'node');
     },
-    [map.nodes, updateMap, addToast]
+    [map.nodes, updateMap, addToast, addLog]
   );
 
   const handleDeleteNode = useCallback(
@@ -189,8 +207,9 @@ export function Canvas({ initialMap }: Props) {
       updateMap((m) => deleteNode(m, id));
       if (selectedId === id) setSelectedId(null);
       addToast('Node deleted', 'info');
+      addLog('delete-node', `Node ${id.slice(0, 8)}...`, 'node');
     },
-    [selectedId, updateMap, addToast]
+    [selectedId, updateMap, addToast, addLog]
   );
 
   const handleDeleteConnection = useCallback(
@@ -198,14 +217,16 @@ export function Canvas({ initialMap }: Props) {
       updateMap((m) => deleteConnection(m, id));
       if (selectedConnectionId === id) setSelectedConnectionId(null);
       addToast('Connection deleted', 'info');
+      addLog('delete-connection', `Connection ${id.slice(0, 8)}...`, 'connection');
     },
-    [selectedConnectionId, updateMap, addToast]
+    [selectedConnectionId, updateMap, addToast, addLog]
   );
 
   const handleSelectConnection = useCallback((id: string) => {
     setSelectedConnectionId(id);
     setSelectedId(null);
-  }, []);
+    addLog('select-connection', `Connection ${id.slice(0, 8)}...`, 'connection');
+  }, [addLog]);
 
   const handleConnectionContextMenu = useCallback((e: React.MouseEvent, connectionId: string) => {
     setContextMenu({
@@ -214,7 +235,8 @@ export function Canvas({ initialMap }: Props) {
       type: 'connection',
       connectionId,
     });
-  }, []);
+    addLog('context-menu', 'Connection context menu', 'connection');
+  }, [addLog]);
 
   const handleNodeContextMenu = useCallback((e: React.MouseEvent, nodeId: string) => {
     setSelectedId(nodeId);
@@ -224,38 +246,43 @@ export function Canvas({ initialMap }: Props) {
       type: 'node',
       nodeId,
     });
-  }, []);
+    addLog('context-menu', 'Node context menu', 'node');
+  }, [addLog]);
 
   const handleStartConnect = useCallback((id: string) => {
     setConnectingFrom(id);
-  }, []);
+    addLog('start-connect', `From ${id.slice(0, 8)}...`, 'connection');
+  }, [addLog]);
 
   const handleAutoLayout = useCallback(() => {
     updateMap((m) => autoLayout(m));
     addToast('Layout applied', 'success');
-  }, [updateMap, addToast]);
+    addLog('auto-layout', 'Applied auto-layout', 'map');
+  }, [updateMap, addToast, addLog]);
 
   const handleCopy = useCallback((id: string) => {
     const node = map.nodes.find((n) => n.id === id);
     if (node) {
       setClipboard(node);
       addToast('Node copied', 'info');
+      addLog('copy', `"${node.text}"`, 'clipboard');
     }
-  }, [map.nodes, addToast]);
+  }, [map.nodes, addToast, addLog]);
 
   const handlePaste = useCallback((x: number, y: number) => {
     if (!clipboard) return;
     updateMap((m) => addNode(m, clipboard.parentId, { x, y }, clipboard.text));
     addToast('Node pasted', 'success');
-  }, [clipboard, updateMap, addToast]);
+    addLog('paste', `"${clipboard.text}" at (${Math.round(x)}, ${Math.round(y)})`, 'clipboard');
+  }, [clipboard, updateMap, addToast, addLog]);
 
   const handleDuplicate = useCallback((id: string) => {
     updateMap((m) => duplicateNode(m, id));
     addToast('Node duplicated', 'success');
-  }, [updateMap, addToast]);
+    addLog('duplicate', `Node ${id.slice(0, 8)}...`, 'node');
+  }, [updateMap, addToast, addLog]);
 
   const handleSelectAll = useCallback(() => {
-    // Select first node as a visual indicator
     if (map.nodes.length > 0) {
       setSelectedId(map.nodes[0].id);
     }
@@ -271,7 +298,8 @@ export function Canvas({ initialMap }: Props) {
     a.click();
     URL.revokeObjectURL(url);
     addToast('Map exported', 'success');
-  }, [map, addToast]);
+    addLog('export', `"${map.name}"`, 'map');
+  }, [map, addToast, addLog]);
 
   const handleImport = useCallback(
     (json: string) => {
@@ -282,11 +310,13 @@ export function Canvas({ initialMap }: Props) {
         setSelectedId(null);
         resetView();
         addToast('Map imported', 'success');
+        addLog('import', `"${imported.name}"`, 'map');
       } else {
         addToast('Invalid JSON file', 'error');
+        addLog('import-fail', 'Invalid JSON', 'map');
       }
     },
-    [resetView, replaceMap, addToast]
+    [resetView, replaceMap, addToast, addLog]
   );
 
   const handleRename = useCallback(
@@ -302,7 +332,8 @@ export function Canvas({ initialMap }: Props) {
     setSelectedId(null);
     resetView();
     addToast('New map created', 'success');
-  }, [resetView, replaceMap, addToast]);
+    addLog('new-map', `"${newMap.name}"`, 'map');
+  }, [resetView, replaceMap, addToast, addLog]);
 
   const handleSelectMap = useCallback(
     (id: string) => {
@@ -311,27 +342,43 @@ export function Canvas({ initialMap }: Props) {
         replaceMap(loaded);
         setSelectedId(null);
         resetView();
+        addLog('load-map', `"${loaded.name}"`, 'map');
       }
     },
-    [resetView, replaceMap]
+    [resetView, replaceMap, addLog]
   );
 
   const handleDeleteMap = useCallback((id: string) => {
     deleteMap(id);
     addToast('Map deleted', 'info');
-  }, [addToast]);
+    addLog('delete-map', `Map ${id.slice(0, 8)}...`, 'map');
+  }, [addToast, addLog]);
 
   const handleZoomIn = useCallback(() => {
     setView((prev) => ({ ...prev, zoom: Math.min(3, prev.zoom * 1.2) }));
-  }, [setView]);
+    addLog('zoom-in', 'Zoom in', 'view');
+  }, [setView, addLog]);
 
   const handleZoomOut = useCallback(() => {
     setView((prev) => ({ ...prev, zoom: Math.max(0.2, prev.zoom / 1.2) }));
-  }, [setView]);
+    addLog('zoom-out', 'Zoom out', 'view');
+  }, [setView, addLog]);
 
   const handleMinimapNavigate = useCallback((panX: number, panY: number) => {
     setView((prev) => ({ ...prev, panX, panY }));
-  }, [setView]);
+    addLog('minimap-nav', `Pan to (${Math.round(panX)}, ${Math.round(panY)})`, 'view');
+  }, [setView, addLog]);
+
+  // Run test = toast + log the attempt
+  const handleRunTest = useCallback((testName: string) => {
+    addLog('run-test', testName, 'test');
+    addToast(`Testing: ${testName}`, 'info');
+  }, [addLog, addToast]);
+
+  const handleRunAllTests = useCallback(() => {
+    addLog('run-all-tests', `${map.nodes.length} nodes, ${map.connections.length} connections`, 'test');
+    addToast('Running all tests...', 'info');
+  }, [addLog, addToast, map.nodes.length, map.connections.length]);
 
   // Keyboard shortcuts
   const handleKeyDown = useCallback(
@@ -344,11 +391,13 @@ export function Canvas({ initialMap }: Props) {
         if (e.key === 'z' && !e.shiftKey) {
           e.preventDefault();
           undo();
+          addLog('undo', 'Undo', 'map');
           return;
         }
         if ((e.key === 'z' && e.shiftKey) || e.key === 'y') {
           e.preventDefault();
           redo();
+          addLog('redo', 'Redo', 'map');
           return;
         }
         if (e.key === 'c' && selectedId) {
@@ -368,7 +417,6 @@ export function Canvas({ initialMap }: Props) {
         }
         if (e.key === 'f') {
           e.preventDefault();
-          // Focus search is handled by toolbar
           setSearchQuery('');
           return;
         }
@@ -379,7 +427,6 @@ export function Canvas({ initialMap }: Props) {
         }
       }
 
-      // Don't intercept when typing in inputs
       if (isInput) return;
 
       if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -406,7 +453,6 @@ export function Canvas({ initialMap }: Props) {
         handleAddChild(selectedId);
       }
 
-      // Arrow keys for panning
       const PAN_STEP = 50;
       if (e.key === 'ArrowUp') {
         e.preventDefault();
@@ -425,7 +471,6 @@ export function Canvas({ initialMap }: Props) {
         setView((prev) => ({ ...prev, panX: prev.panX - PAN_STEP }));
       }
 
-      // +/- for zoom
       if (e.key === '=' || e.key === '+') {
         handleZoomIn();
       }
@@ -433,7 +478,7 @@ export function Canvas({ initialMap }: Props) {
         handleZoomOut();
       }
     },
-    [selectedId, selectedConnectionId, map.nodes, clipboard, handleDeleteNode, handleDeleteConnection, handleAddChild, handleCopy, handlePaste, handleDuplicate, handleSelectAll, handleZoomIn, handleZoomOut, undo, redo, setView]
+    [selectedId, selectedConnectionId, map.nodes, clipboard, handleDeleteNode, handleDeleteConnection, handleAddChild, handleCopy, handlePaste, handleDuplicate, handleSelectAll, handleZoomIn, handleZoomOut, undo, redo, setView, addLog]
   );
 
   const selectedNode = selectedId ? map.nodes.find((n) => n.id === selectedId) ?? null : null;
@@ -537,7 +582,6 @@ export function Canvas({ initialMap }: Props) {
           <rect className="canvas-bg" width="100%" height="100%" fill="url(#grid-major)" />
 
           <g transform={`translate(${view.panX},${view.panY}) scale(${view.zoom})`}>
-            {/* Connections */}
             {map.connections.map((conn) => {
               const from = map.nodes.find((n) => n.id === conn.fromId);
               const to = map.nodes.find((n) => n.id === conn.toId);
@@ -555,7 +599,6 @@ export function Canvas({ initialMap }: Props) {
               );
             })}
 
-            {/* Connection preview line */}
             {connectFromNode && mousePos && (
               <line
                 x1={connectFromNode.position.x + connectFromNode.width / 2}
@@ -570,7 +613,6 @@ export function Canvas({ initialMap }: Props) {
               />
             )}
 
-            {/* Nodes */}
             {map.nodes.map((node) => {
               const dimmed = matchedNodeIds && !matchedNodeIds.has(node.id);
               return (
@@ -601,10 +643,22 @@ export function Canvas({ initialMap }: Props) {
         <Minimap
           map={map}
           view={view}
-          canvasWidth={canvasSize.w - 280}
+          canvasWidth={canvasSize.w - 280 - (showTesting ? 300 : 0)}
           canvasHeight={canvasSize.h}
           onNavigate={handleMinimapNavigate}
         />
+
+        {/* Testing panel toggle button */}
+        <button
+          onClick={() => setShowTesting(!showTesting)}
+          style={testToggleStyle}
+          title="Toggle UI Testing Panel"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/>
+          </svg>
+          <span style={{ fontSize: 11, fontWeight: 600 }}>Test</span>
+        </button>
 
         {/* Help hint */}
         <div style={hintStyle}>
@@ -612,7 +666,7 @@ export function Canvas({ initialMap }: Props) {
         </div>
       </div>
 
-      {/* Right panel */}
+      {/* Right panel — Properties */}
       <PropertiesPanel
         map={map}
         selectedNode={selectedNode}
@@ -624,6 +678,25 @@ export function Canvas({ initialMap }: Props) {
         onAutoLayout={handleAutoLayout}
       />
 
+      {/* Testing Panel — far right */}
+      {showTesting && (
+        <TestingPanel
+          map={map}
+          view={view}
+          selectedId={selectedId}
+          selectedConnectionId={selectedConnectionId}
+          connectingFrom={connectingFrom}
+          clipboard={clipboard}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          searchQuery={searchQuery}
+          logs={logs}
+          onRunTest={handleRunTest}
+          onRunAllTests={handleRunAllTests}
+          onClose={() => setShowTesting(false)}
+        />
+      )}
+
       {/* Context Menu */}
       {contextMenu && (
         <ContextMenu
@@ -633,7 +706,7 @@ export function Canvas({ initialMap }: Props) {
           canRedo={canRedo}
           canPaste={!!clipboard}
           onClose={() => setContextMenu(null)}
-          onAddNode={(x, y) => { updateMap((m) => addNode(m, null, { x, y })); addToast('Node added', 'success'); }}
+          onAddNode={(x, y) => { updateMap((m) => addNode(m, null, { x, y })); addToast('Node added', 'success'); addLog('add-node', 'From context menu', 'node'); }}
           onPaste={(x, y) => handlePaste(x, y)}
           onSelectAll={handleSelectAll}
           onAutoLayout={handleAutoLayout}
@@ -700,4 +773,24 @@ const hintStyle: React.CSSProperties = {
   borderRadius: 10,
   border: '1px solid #E2E8F0',
   whiteSpace: 'nowrap',
+};
+
+const testToggleStyle: React.CSSProperties = {
+  position: 'absolute',
+  top: 62,
+  right: 12,
+  background: 'rgba(255,255,255,0.9)',
+  backdropFilter: 'blur(8px)',
+  border: '1px solid #E2E8F0',
+  borderRadius: 10,
+  padding: '6px 12px',
+  cursor: 'pointer',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  color: '#475569',
+  boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+  zIndex: 50,
+  fontFamily: 'inherit',
+  transition: 'all 0.15s',
 };
